@@ -1,0 +1,160 @@
+---
+title: "gov51_ps3"
+format: pdf
+editor: visual
+---
+
+## Joshua Stewart
+
+GitHub Link: \_\_\_\_\_
+
+## 1 Setup and Data Exploration (10 Points)
+
+### 1.1 Load packages and data
+
+Load the tidyverse, glmnet, and knitr packages. Then load the COMPAS dataset from data/compas_clean.csv.
+
+```{r}
+library(tidyverse)
+library(glmnet)
+library(knitr)
+
+compas <- read_csv("data/raw/compas_clean.csv")
+```
+
+### **1.2 How many observations and variables are in the dataset? What is the unit of
+observation?**
+
+```{r}
+nrow(compas)
+ncol(compas)
+head(compas)
+```
+
+There are 7,214 observations and 17 variables in the data set. Each observation is a person.
+
+### **1.3 Examine the outcome variable**
+
+**The variable recidivism equals 1 if the person was rearrested within two years and 0 otherwise.
+(a) What is the overall recidivism rate in the data?**
+
+```{r}
+mean(compas$recidivism, na.rm = TRUE)
+```
+
+Approximately 45.1% of individuals recidivated.
+
+**(b) Is this outcome continuous or binary? Why does this matter for how we interpret predictions from a linear model?**
+
+The recidivism variable is binary: 0 if the individual has not recidivized and 1 if they have. This matters for how we interpret predictions from a linear model because in linear models, when the outcome is binary, the prediction is interpreted as a probability. That said, linear models can produce values above 1 and below 0, which would not make sense for this scenario.
+
+### 1.4 Summary statistics
+
+**Create a summary statistics table showing the mean and standard deviation of all variables in
+the dataset. Briefly note which variables have the most variation and which have the least.**
+
+```{r}
+library(dplyr)
+
+compas |> 
+  summarise(across(everything(),
+                   list(mean = ~mean(.x, na.rm = TRUE),
+                        sd = ~sd(.x, na.rm = TRUE))))
+```
+
+The priors_count variable has the most variation (SD = 4.88), with age following behind (SD = 11.89). That said, the variation in age is expected. \
+
+The variables with the least variation are the race variables. For example, the native american and asian identities have a standard deviation of 0.05 and 0.066. That said, I assume ti is because they are binary indicators that appear less frequently in the sample.
+
+### 1.5 Explore key predictors
+
+**Create a bar chart showing the recidivism rate by number of prior offenses (priors_count).
+Group priors_count into categories: 0, 1–2, 3–5, 6–10, and 11+. What pattern do you see?**
+
+```{r}
+compas_gr <- compas |>
+  mutate(priors_group = case_when(priors_count == 0 ~ "0",
+                                  priors_count %in% 1:2 ~ "1–2",
+                                  priors_count %in% 3:5 ~ "3–5",
+                                  priors_count %in% 6:10 ~ "6–10",
+                                  priors_count >= 11 ~ "11+"))
+summary_table <- compas_gr |>
+  group_by(priors_group) |>
+  summarize(recid_rate = mean(recidivism, na.rm = TRUE))
+
+ggplot(summary_table, aes(x = priors_group, y = recid_rate)) +
+  geom_col(fill = "pink") +
+  labs(x = "Number of Prior Offenses",
+       y = "Recidivism Rate",
+       title = "Recidivism Rate by Number of Prior Offense")
+```
+
+## 2 OLS Baseline (15 points)
+
+### 2.1 Train/test split
+
+**Set your seed to 51 for reproducibility. Split the data into a training set (80%) and a test set
+(20%).**
+
+```{r}
+set.seed(51)
+n <- nrow(compas)
+train_idx <- sample(1:n, size = floor(0.8 * n))
+train <- compas[train_idx, ]
+test <- compas[-train_idx, ]
+
+nrow(train)
+nrow(test)
+```
+
+**How many observations are in each set?**
+
+There are 5,771 observations in the the train data set and 1,443 in the test data set.
+
+### 2.2 Fit OLS with main effects only
+
+**Fit an OLS regression of recidivism on all other variables in the training data using lm(recidivism \~ ., data = train). This gives you a model with 16 predictors.**
+
+```{r}
+summary(lm(recidivism ~ ., data = train))
+```
+
+**(a) Which predictors are statistically significant at the 5% level?**
+
+Predictors are statistically significant at the 5% level if they are less than 0.05. In this data set, the following predictors fulfill this requirement: age (p \< 2e-16), female (p = 0.00), priors_count (p \< 2e-16), felony (0.00), has juvenile misdemeanor (p = 0.04), and age between 25-45 (p = 0.00).
+
+**(b) Interpret the coefficient on priors_count in one sentence.**
+
+The coefficient on priors_count (0.03) means that each additional prior offense is associated with approximately a 3 percentage point increase in probability of recidivism, holding all other variables constant.
+
+### 2.3 In-sample vs. out-of-sample RMSE
+
+**Root Mean Squared Error (RMSE) measures average prediction error.**
+
+**(a) Compute the in-sample RMSE (predictions on the training data).**
+
+```{r}
+model <- lm(recidivism ~ ., data = train)
+train_pred <- predict(model, newdata = train)
+
+train_rmse <- sqrt(mean((train_pred - train$recidivism)^2))
+train_rmse
+```
+
+**(b) Compute the out-of-sample RMSE (predictions on the test data).**
+
+```{r}
+test_pred <- predict(model, newdata = test)
+
+test_rmse <- sqrt(mean((test_pred - test$recidivism)^2))
+test_rmse
+```
+
+**(c) How large is the gap between in-sample and out-of-sample RMSE? Is OLS overfitting
+with 16 predictors?**
+
+```{r}
+test_rmse - train_rmse
+```
+
+The difference between in-sample (RMSE = 0.46) and
