@@ -6,7 +6,7 @@ editor: visual
 
 ## Joshua Stewart
 
-GitHub Link: \_\_\_\_\_
+GitHub Link: <https://github.com/JoshuaMcKoy/gov51_ps3>
 
 ## 1 Setup and Data Exploration (10 Points)
 
@@ -22,8 +22,7 @@ library(knitr)
 compas <- read_csv("data/raw/compas_clean.csv")
 ```
 
-### **1.2 How many observations and variables are in the dataset? What is the unit of
-observation?**
+### 1.2 How many observations and variables are in the dataset? What is the unit of observation?
 
 ```{r}
 nrow(compas)
@@ -35,8 +34,7 @@ There are 7,214 observations and 17 variables in the data set. Each observation 
 
 ### **1.3 Examine the outcome variable**
 
-**The variable recidivism equals 1 if the person was rearrested within two years and 0 otherwise.
-(a) What is the overall recidivism rate in the data?**
+**The variable recidivism equals 1 if the person was rearrested within two years and 0 otherwise. (a) What is the overall recidivism rate in the data?**
 
 ```{r}
 mean(compas$recidivism, na.rm = TRUE)
@@ -50,8 +48,7 @@ The recidivism variable is binary: 0 if the individual has not recidivized and 1
 
 ### 1.4 Summary statistics
 
-**Create a summary statistics table showing the mean and standard deviation of all variables in
-the dataset. Briefly note which variables have the most variation and which have the least.**
+**Create a summary statistics table showing the mean and standard deviation of all variables in the dataset. Briefly note which variables have the most variation and which have the least.**
 
 ```{r}
 library(dplyr)
@@ -62,14 +59,13 @@ compas |>
                         sd = ~sd(.x, na.rm = TRUE))))
 ```
 
-The priors_count variable has the most variation (SD = 4.88), with age following behind (SD = 11.89). That said, the variation in age is expected. \
+The priors_count variable has the most variation (SD = 4.88), with age following behind (SD = 11.89). That said, the variation in age is expected.\
 
 The variables with the least variation are the race variables. For example, the native american and asian identities have a standard deviation of 0.05 and 0.066. That said, I assume ti is because they are binary indicators that appear less frequently in the sample.
 
 ### 1.5 Explore key predictors
 
-**Create a bar chart showing the recidivism rate by number of prior offenses (priors_count).
-Group priors_count into categories: 0, 1–2, 3–5, 6–10, and 11+. What pattern do you see?**
+**Create a bar chart showing the recidivism rate by number of prior offenses (priors_count). Group priors_count into categories: 0, 1–2, 3–5, 6–10, and 11+. What pattern do you see?**
 
 ```{r}
 compas_gr <- compas |>
@@ -93,8 +89,7 @@ ggplot(summary_table, aes(x = priors_group, y = recid_rate)) +
 
 ### 2.1 Train/test split
 
-**Set your seed to 51 for reproducibility. Split the data into a training set (80%) and a test set
-(20%).**
+**Set your seed to 51 for reproducibility. Split the data into a training set (80%) and a test set (20%).**
 
 ```{r}
 set.seed(51)
@@ -150,11 +145,139 @@ test_rmse <- sqrt(mean((test_pred - test$recidivism)^2))
 test_rmse
 ```
 
-**(c) How large is the gap between in-sample and out-of-sample RMSE? Is OLS overfitting
-with 16 predictors?**
+**(c) How large is the gap between in-sample and out-of-sample RMSE? Is OLS overfitting with 16 predictors?**
 
 ```{r}
 test_rmse - train_rmse
 ```
 
-The difference between in-sample (RMSE = 0.46) and
+The difference between in-sample RMSE (0.46) and the out-of-sample RMSE (0.46) is 0.0016. Given that the model generalizes well to the out-of-sample estimartes, OLS is not overfitting the data.
+
+### 2.4 Cross-validation by hand
+
+**A single train/test split depends on which observations happened to land in each group. Cross-validation averages over multiple splits to give a more stable estimate of out-of-sample performance.**
+
+**Implement 5-fold cross-validation for the simple OLS model:
+1. Randomly assign each training observation to one of 5 folds.
+2. For each fold 𝑘 = 1, … , 5: fit OLS on the other 4 folds, predict fold 𝑘, compute RMSE.
+3. Average the 5 RMSE values**
+
+```{r}
+set.seed(51)
+folds <- sample(rep(1:5, length.out = nrow(train)))
+
+rmse_cv <- numeric(5)
+for (k in 1:5) {train_k <- train[folds != k, ]
+  test_k <- train[folds == k, ]
+  model_k <- lm(recidivism ~ ., data = train_k)
+  pred_k <- predict(model_k, newdata = test_k)
+  rmse_cv[k] <- sqrt(mean((test_k$recidivism - pred_k)^2))}
+
+mean(rmse_cv)
+```
+
+**(a) What is the 5-fold CV estimate of RMSE? How does it compare to your single-split
+out-of-sample RMSE?**
+
+The 5-fold CV estimate of RMSE is 0.46. This matches our single-split out-of-sample RMSE.
+
+**(b) In your own words, why is cross-validation more reliable than a single train/test split?**
+
+Cross-validation is more reliable than a single train/test split because it averages prediction error across multiple different splits of the data, instead of relying on a single train/test split. This reduces the impact of random variation in how the data is divided.
+
+**(c) When we use cv.glmnet() later, it does this same process internally to choose the
+penalty parameter 𝜆. Why is cross-validation the right tool for choosing 𝜆?**
+
+Cross-validation is the right tool for choosing λ because it allows us to choose the value of λ that minimizes prediction error on out-of-sample data, helping balance overfitting and underfitting.
+
+## 3 The Kitchen Sink: What Happens When You Add Too Many Predictors? (15 points)
+
+**The simple OLS model uses 16 main effects. But maybe interactions between variables would
+help. What if being young AND having prior offenses is different from the sum of each effect
+alone? Let’s find out what happens when we throw in everything.**
+
+### 3.1 Build the expanded model
+
+The formula below creates all pairwise interactions plus squared terms for the continuous
+variables. This expands our feature set from 16 to about 141 predictors.
+
+```{r}
+f_full <- recidivism ~ (.)^2 +
+I(age^2) + I(priors_count^2) +
+I(juv_fel_count^2) + I(juv_misd_count^2) +
+I(juv_other_count^2)
+
+X_train <- model.matrix(f_full, data = train)[, -1]
+X_test <- model.matrix(f_full, data = test)[, -1]
+y_train <- train$recidivism
+y_test <- test$recidivism
+
+ncol(X_train)
+```
+
+**(a) How many predictors does this expanded model have?**
+
+This expanded model has 141 predictors. **(b) What is the ratio of training observations to predictors? (Compare to the simple model.)**
+
+```{r}
+5771/141
+5771/16
+```
+
+The ratio of training observations in the expanded model is 40.93:1, while it is 360.69:1 in the simple model.
+
+### 3.2 Fit OLS with the kitchen sink
+
+**Fit OLS on the expanded feature set: ols_full \<- lm(f_full, data = train).**
+
+```{r}
+ols_full <- lm(f_full, data = train)
+```
+
+**(a) Compute the in-sample RMSE for this model.**
+
+```{r}
+pred_train <- predict(ols_full, newdata = train)
+
+rmse_train_full <- sqrt(mean((train$recidivism - pred_train)^2))
+rmse_train_full
+```
+
+**(b) Compute the out-of-sample RMSE.**
+
+```{r}
+pred_test <- predict(ols_full, newdata = test)
+
+rmse_test_full <- sqrt(mean((test$recidivism - pred_test)^2))
+rmse_test_full
+```
+
+**(c) How does the in-sample/out-of-sample gap compare to the simple 19-predictor OLS? What happened and why?**
+
+```{r}
+rmse_test_full-rmse_train_full
+```
+
+The in-sample/out-of-sample gap is larger in the expanded model (0.04) than in the simple model (0.0016). This demonstrates that the newer model might be overfitting the data the training data, increasing training data fit but decreasing predicitve performance with the test sample.
+
+### 3.3 The overfitting lesson
+
+**In 2–3 sentences, explain why adding 180 interaction terms made the model’s in-sample fit better but its out-of-sample predictions worse. What is this phenomenon called?**
+
+Adding interaction terms increases the model's complexity, which imrpoves the in-sample fit by capturing more patterns of the training data. That said, this leads the model to fit noise rather than signals, resulting in worse performance iwth the out-of-sample test data. This is called overfitting the training data.
+
+## 4 Ridge Regression: Shrink Everything (15 points)
+
+**Ridge regression adds an L2 penalty that shrinks all coefficients toward zero. Larger 𝜆 means
+more shrinkage. The key idea: Ridge trades a small amount of bias for a large reduction in
+variance.**
+
+### 4.1 Fit Ridge with cross-validation
+
+**Use cv.glmnet() with alpha = 0 to fit Ridge regression on the expanded training data (the
+X_train matrix with \~141 features). Use 10-fold cross-validation (the default) to select the
+optimal 𝜆.**
+
+```{r}
+
+```
