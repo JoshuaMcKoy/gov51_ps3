@@ -19,7 +19,7 @@ library(tidyverse)
 library(glmnet)
 library(knitr)
 
-compas <- read_csv("data/raw/compas_clean.csv")
+compas <- read_csv("../data/raw/compas_clean.csv")
 ```
 
 ### 1.2 How many observations and variables are in the dataset? What is the unit of observation?
@@ -279,5 +279,268 @@ X_train matrix with \~141 features). Use 10-fold cross-validation (the default) 
 optimal 𝜆.**
 
 ```{r}
+set.seed(51)
+cv_ridge <- cv.glmnet(X_train, y_train, alpha = 0, nfolds = 10)
+```
+
+**(a) What is the optimal 𝜆 selected by cross-validation? (Use lambda.min.)**
+
+```{r}
+cv_ridge$lambda.min
+```
+
+The optimal **𝜆** selected by cross-validation is 0.014.
+
+**(b) Plot the cross-validation curve using plot(cv_ridge). What does this plot show?**
+
+```{r}
+plot(cv_ridge)
+```
+
+The plot shows the cross-validated mean squared error as a function of λ. The error decreases as λ increases and then levels off, indicating that reducing regularization improves model fit up to a point. The optimal λ (lambda.min = 0.014) minimizes the cross-validated error.
+
+### 4.2 Ridge RMSE
+
+**Compute the out-of-sample RMSE for Ridge. Compare to both the simple OLS (16 vars) and the kitchen-sink OLS (\~141 vars). What happened?**
+
+```{r}
+pred_ridge <- predict(cv_ridge, newx = X_test, s = "lambda.min")
+
+rmse_ridge <- sqrt(mean((y_test - pred_ridge)^2))
+rmse_ridge
+```
+
+The out-of-sample RMSE for Ridge (0.47) is a little less accurate than simple OLS (0.46) and a bit more accurate than the kitchen-sink OLS (0.49). Ridge improves the performance by shrinking coefficients and reducing variance, allowing it to handle the large number of predictors more effectively, although it does not outperform the simpler OLS model.
+
+### 4.3 Did Ridge set any coefficients to zero?
+
+**Extract the Ridge coefficients using coef(cv_ridge, s = "lambda.min"). Did Ridge eliminate any variables? Why or why not?**
+
+```{r}
+coef(cv_ridge, s = "lambda.min")
+```
+
+Ridge did not eliminate variables, though some of them naturally have reduced to zero due to factors unrelated to the ridge penalty.
+
+## **5 LASSO Regression: Shrink and Select (15 points)**
+
+**LASSO (Least Absolute Shrinkage and Selection Operator) uses an L1 penalty. Unlike Ridge, LASSO can shrink coeﬀicients all the way to exactly zero, effectively performing variable selection.**		
+
+### 5.1 Fit LASSO with cross-validation
+
+**Use cv.glmnet() with alpha = 1 on the expanded training data. Remember to set your seed
+first for reproducibility.**
+
+```{r}
+set.seed(51)
+cv_lasso <- cv.glmnet(X_train, y_train, alpha = 1, nfolds = 10)
+```
+
+**(a) What is the optimal 𝜆?**
+
+```{r}
+cv_lasso$lambda.min
+```
+
+The optimal **𝜆** 0.0077.
+
+**(b) Plot the cross-validation curve.**
+
+```{r}
+plot(cv_lasso)
+```
+
+### 5.2 LASSO variable selection
+
+**Extract the LASSO coefficients at lambda.min.
+(a) How many of the \~141 variables survived (non-zero coefficient)? How many were eliminated?**
+
+```{r}
+lasso_coef <- coef(cv_lasso, s = "lambda.min")
+
+coef_values <- as.vector(lasso_coef)
+coef_names <- rownames(lasso_coef)
+
+nonzero <- coef_names[coef_values != 0]
+
+nonzero
+
+sum(coef_values != 0)
+sum(coef_values == 0)
+```
+
+Out of approximately 141 predictors, 28 have non-zero coefficients and 114 are eliminated/set to zero.
+
+**(b) List a few of the surviving interaction terms. Do they make substantive sense?**
+
+Some surviving interaction terms include age:female, priors_count:age_25_45, and juv_fel_count:age_under_25. I would say that these make substantive sense because they allow the effect of variables such as prior offenses or juvenile history on recidivism to vary across demographic groups like age or gender.
+
+**(c) Baker (2025) argues that LASSO reduces “subjective discretion” in model building. How does what you see here illustrate that argument?**
+
+This illustrates Baker’s argument because LASSO automatically selects a subset of variables based on predictive performance, rather than individually choosing which variables or interactions to include. From my understanding, by retaining only interactions that contribute most to prediction, LASSO reduces subjective discretion.
+
+### **5.3 LASSO RMSE**
+
+**Compute the out-of-sample RMSE for LASSO. How does it compare to OLS (both versions) and Ridge?**
+
+```{r}
+pred_lasso <- predict(cv_lasso, newx = X_test, s = "lambda.min")
+rmse_lasso <- sqrt(mean((y_test - pred_lasso)^2))
+rmse_lasso
+```
+
+The LASSO RMSE is 0.46, which is incredibly similar to the simple OLS RMSE (0.46) and smaller than the kitchen-sink OLS RMSE (0.40) and the Ridge RMSE (0.47). Thus, LASSO improves the prediction by eliminating the less necessary variables.
+
+## 6 Model Comparison and Interpretation (30 points)
+
+### **6.1 Elastic Net**
+
+**Fit an Elastic Net with alpha = 0.5 on the expanded training data. Remember to set your seed first. Compute its out-of-sample RMSE and count how many variables it retains.**
+
+```{r}
+set.seed(51)
+cv_enet <- cv.glmnet(X_train, y_train, alpha = 0.5, nfolds = 10)
+
+pred_enet <- predict(cv_enet, newx = X_test, s = "lambda.min")
+
+rmse_enet <- sqrt(mean((y_test - pred_enet)^2))
+rmse_enet
+
+enet_coef <- coef(cv_enet, s = "lambda.min")
+
+coef_values <- as.vector(enet_coef)
+
+sum(coef_values[-1] != 0)
+```
+
+The out-of-sample RMSE is approximately 0.46, and the model retains 43 variables.
+
+### 6.2 The big comparison table
+
+**Fill in this table with your results:**
+
+```{r}
+results <- data.frame(Model = c("OLS (main effects)", 
+                                "OLS (kitchen sink)", 
+                                "Ridge", 
+                                "LASSO", 
+                                "Elastic Net"),
+                      Predictors = c(16, 
+                                     141, 
+                                     141, 
+                                     28, 
+                                     sum(as.vector(coef(cv_enet, s = "lambda.min"))[-1] != 0)),
+                      "Out-of-Sample RMSE" = c(test_rmse, 
+                                               rmse_test_full, 
+                                               rmse_ridge, 
+                                               rmse_lasso, 
+                                               rmse_enet))
+results
+```
+
+**(a) Which model has the lowest out-of-sample RMSE?**
+
+The elastic net model has the lowest out-of-sample RMSE (0.458).
+
+**(b) Which model has the best in-sample fit? Is that the same model?**
+
+The kitchen-sink OLS model has the best in-sample fit because it has the lowest training error due to its large number of predictors. This is not the same model with the lowest out-of-sample RMSE, as it overfits the training data and performs worse on new data.
+
+**(c) In 2–3 sentences, explain what this table teaches about the bias-variance tradeof.**
+
+This table teaches us that models with more predictors may decrease variance at the expense of increasing bias because the system overfits to the idiosyncracies of the training data, making it less useful in actual prediction. On the other hand, allowing for a little bit of bias can drastically increase the predictive power of the model.
+
+### 6.3 Baker article connection
+
+**In Baker (2025), two experts in the Halliburton securities case selected different peer firms and reached different conclusions about whether a stock drop was statistically significant.
+(a) How did LASSO help narrow the disagreement between dueling experts?**
+
+By automatically shrinking some coefficients to zero and keeping only the most predictive variables, LASSO reduces the ability of different experts to reach different conclusions based on different model specifications, instead of the analysts' subjective choices.
+
+**(b) Based on your experience with LASSO in this problem set, what aspect of the traditional OLS approach gives the analyst the most room for manipulation?**
+
+Based on my experience with LASSO, the traditional OLS approach gives the analysts the most room for manipulation in variable/interaction selection. As seen in this problem set, adding or removing predictors can substantially change the results, allowing analysts to influence conclusions through subjective model specification.
+
+### 6.4 Prediction vs. explanation
+
+**We used these models to predict recidivism. Suppose instead you wanted to know whether
+priors_count causes higher recidivism.
+(a) Would the LASSO coefficient on priors_count answer this causal question? Why or why not?**
+
+The LASSO coefficient on priors_count would not answer this causal question. First, LASSO is designed for prediction, not causality. Second, the estimated relationship may reflect correlations driven by confounding variables rather than a true causal effect.
+
+**(b) What is the difference between using regression for prediction versus using it for causal inference?**
+
+Regression for prediction focuses on minimizing prediction error and may include many variables or interactions without concern for causal interpretation. In contrast, causal inference aims to estimate the effect of one variable on another, carefully considering confounding/omitted variables.
+
+### 6.5 Algorithmic fairness
+
+**Algorithms like COMPAS are used in real courtrooms to inform bail and sentencing decisions.
+(a) Using your simple OLS model (16 vars), compute the mean predicted recidivism probability separately for Black defendants and white defendants in the test set. Is there a
+difference?**
+
+```{r}
+test$pred_ols <- predict(model, newdata = test)
+
+black_mean_pred <- test |>
+  filter(black == 1) |>
+  summarise(mean_pred = mean(pred_ols, na.rm = TRUE))
+
+white_mean_pred <- test |>
+  filter(black == 0,
+         hispanic == 0,
+         asian == 0,
+         other_race == 0,
+         native_american == 0) |>
+  summarise(mean_pred = mean(pred_ols, na.rm = TRUE))
+
+black_mean_pred
+white_mean_pred
+
+black_pred <- test |>
+  filter(black == 1) |>
+  summarise(mean_pred = mean(pred_ols, na.rm = TRUE)) |>
+  pull(mean_pred)
+
+white_pred <- test |>
+  filter(black == 0,
+         hispanic == 0,
+         asian == 0,
+         other_race == 0,
+         native_american == 0) |>
+  summarise(mean_pred = mean(pred_ols, na.rm = TRUE)) |>
+  pull(mean_pred)
+
+black_pred - white_pred
 
 ```
+
+The mean predicted recidivism for black defendants is 51% and the mean predicted recidivism for white defendants is approximately 38%. This is a probability difference of 13.3 percentage points.
+
+**(b) Now compute the actual recidivism rate for each group. Compare the predictions to the actual rates.**
+
+```{r}
+recid_table <- tibble(
+  group = c("Black defendants", "White defendants"),
+  mean_predicted = c(black_pred, white_pred),
+  actual_rate = c(test |>
+                    filter(black == 1) |>
+                    summarize(mean(recidivism, na.rm = TRUE)) |>
+                    pull(),
+                  test |>
+                    filter(black == 0,
+                           hispanic == 0,
+                           asian == 0,
+                           other_race == 0,
+                           native_american == 0) |>
+                    summarize(mean(recidivism, na.rm = TRUE)) |>
+                    pull()))
+
+recid_table 
+```
+
+The actual recidivism rate is 0.521 for Black defendants and 0.402 for white defendants. The model’s predictions are fairly close to the actual rates for both groups, although it slightly underpredicts recidivism for each group.
+
+**(c) In 2–3 sentences: What are the tradeoffs of using prediction algorithms in criminal justice Reference something specific from your analysis.**
+
+While using prediction algorithms in criminal justice may improve consistency and accuracy, as seen in this analysis where predicted recidivism rates closely match actual outcomes for both groups, it can also predict inaccurately. For example, the model predicts substantially higher risk for Black defendants (0.512) than for white defendants (0.379), reflecting and potentially reinforcing existing disparities. This highlights a key tradeoff: while these tools can be helpful, they may also raise fairness concerns when used in high-stakes decisions.
